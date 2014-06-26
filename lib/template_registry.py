@@ -186,6 +186,8 @@ class TemplateRegistry(object):
 				raise SubmitException("Job '%s' not found" % job_id)
 			else:
 				# Accept stale share but do not continue checking, return a bunch of nothingness
+				log.info("Accepted Stale Share from %s, (%s %s %s %s)" % \
+					(worker_name, binascii.hexlify(extranonce1_bin), extranonce2, ntime, nonce))
 				return (None, None, None, None)
 
 		# Check if ntime looks correct
