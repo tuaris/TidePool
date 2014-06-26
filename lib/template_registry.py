@@ -180,8 +180,13 @@ class TemplateRegistry(object):
 
 		# Check for job
 		job = self.get_job(job_id)
-		if job == None and settings.REJECT_STALE_SHARES:
-			raise SubmitException("Job '%s' not found" % job_id)
+		if job == None:
+			if settings.REJECT_STALE_SHARES:
+				# Reject stale share
+				raise SubmitException("Job '%s' not found" % job_id)
+			else:
+				# Accept stale share but do not continue checking, return a bunch of nothingness
+				return (None, None, None, None)
 
 		# Check if ntime looks correct
 		if len(ntime) != 8:
