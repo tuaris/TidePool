@@ -7,3 +7,5 @@ Based on the original stratum-mining-pool source and derrivitives.  This mining 
 
 This is fully functional but I have not published all the code.
 Expect the full source to be aviable some time in the next few months.
+
+I am looking for volunteers to help improve and maintain.
