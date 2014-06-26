@@ -104,7 +104,7 @@ VDIFF_VARIANCE_PERCENT = config_file_parser.getint('Pool', 'VDIFF_VARIANCE_PERCE
 
 SOLUTION_BLOCK_HASH = config_file_parser.getboolean('Advanced', 'SOLUTION_BLOCK_HASH')
 BLOCK_CHECK_ALGO_HASH = config_file_parser.getboolean('Advanced', 'BLOCK_CHECK_ALGO_HASH')
-
+REJECT_STALE_SHARES = config_file_parser.getboolean('Advanced', 'REJECT_STALE_SHARES')
 # ******************** Stats Settings *********************
 
 BASIC_STATS = False		# Enable basic stats page. This has stats for ALL users. (Unessesary)
