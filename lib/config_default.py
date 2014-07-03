@@ -184,6 +184,7 @@ USE_COINDAEMON_DIFF = False   # Set the maximum difficulty to the *coin difficul
 DIFF_UPDATE_FREQUENCY = 86400 # Update the *coin difficulty once a day for the VARDIFF maximum
 VDIFF_MIN_TARGET = 15       #  Minimum Target difficulty
 VDIFF_MAX_TARGET = 1000     # Maximum Target difficulty
+VDIFF_MIN_CHANGE = 1        # Minimum change of worker's difficulty if VDIFF_X2_TYPE=False and the final difficulty will be within the boundaries (VDIFF_MIN_TARGET, VDIFF_MAX_TARGET)
 VDIFF_TARGET_TIME = 30      # Target time per share (i.e. try to get 1 share per this many seconds)
 VDIFF_RETARGET_TIME = 120       # Check to see if we should retarget this often
 VDIFF_VARIANCE_PERCENT = 20 # Allow average time to very this % from target without retarget
@@ -206,6 +207,7 @@ DB_LOADER_FORCE_TIME = 300      # How often the cache should be flushed into the
 DB_STATS_AVG_TIME = 300     # When using the DATABASE_EXTEND option, average speed over X sec
                 #   Note: this is also how often it updates
 DB_USERCACHE_TIME = 600     # How long the usercache is good for before we refresh
+DB_STATS_ENABLE = False		# Decides whether or not this process is responisble for updating pool statistics.
 
 # More Options
 REJECT_STALE_SHARES = True

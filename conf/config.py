@@ -70,6 +70,7 @@ DB_LOADER_REC_MAX = 50		# Max Records the bulk loader will commit at a time
 DB_LOADER_FORCE_TIME = 300      # How often the cache should be flushed into the DB regardless of size.
 DB_STATS_AVG_TIME = 300		# When using the DATABASE_EXTEND option, average speed over X sec # Note: this is also how often it updates
 DB_USERCACHE_TIME = 600		# How long the usercache is good for before we refresh
+DB_STATS_ENABLE = False		# Decides whether or not this process is responisble for updating pool statistics.
 
 # ******************** Adv. Pool Settings *********************
 USERS_AUTOADD = True		# Automatically add users to db when they connect.
@@ -90,14 +91,24 @@ DIFF_UPDATE_FREQUENCY = 86400 # Update the litecoin difficulty once a day for th
 ALLOW_EXTERNAL_DIFFICULTY = False 
 
 VDIFF_FLOAT = config_file_parser.getboolean('Pool', 'VDIFF_FLOAT')
-POOL_TARGET = config_file_parser.getint('Pool', 'POOL_TARGET')
 VARIABLE_DIFF = config_file_parser.getboolean('Pool', 'VARIABLE_DIFF')
-VDIFF_MIN_TARGET = config_file_parser.getint('Pool', 'VDIFF_MIN_TARGET')
-VDIFF_MAX_TARGET = config_file_parser.getint('Pool', 'VDIFF_MAX_TARGET') 
+
+if VDIFF_FLOAT:
+	# Floating Point Difficulty
+	POOL_TARGET = config_file_parser.getfloat('Pool', 'POOL_TARGET')
+	VDIFF_MIN_TARGET = config_file_parser.getfloat('Pool', 'VDIFF_MIN_TARGET')
+	VDIFF_MAX_TARGET = config_file_parser.getfloat('Pool', 'VDIFF_MAX_TARGET')
+	VDIFF_MIN_CHANGE = config_file_parser.getfloat('Pool', 'VDIFF_MIN_CHANGE')
+else:
+	# Integer
+	POOL_TARGET = config_file_parser.getint('Pool', 'POOL_TARGET')
+	VDIFF_MIN_TARGET = config_file_parser.getint('Pool', 'VDIFF_MIN_TARGET')
+	VDIFF_MAX_TARGET = config_file_parser.getint('Pool', 'VDIFF_MAX_TARGET')
+	VDIFF_MIN_CHANGE = config_file_parser.getint('Pool', 'VDIFF_MIN_CHANGE')
+
 VDIFF_TARGET_TIME = config_file_parser.getint('Pool', 'VDIFF_TARGET_TIME')
 VDIFF_RETARGET_TIME = config_file_parser.getint('Pool', 'VDIFF_RETARGET_TIME')
 VDIFF_VARIANCE_PERCENT = config_file_parser.getint('Pool', 'VDIFF_VARIANCE_PERCENT')
-
 
 
 #### Advanced Option #####

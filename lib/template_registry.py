@@ -142,12 +142,15 @@ class TemplateRegistry(object):
 		diff1 = util.get_diff_hex();
 		return diff1 / difficulty
 
-	def get_job(self, job_id):
+	def get_job(self, job_id, worker_name, ip=False):
 		'''For given job_id returns BlockTemplate instance or None'''
 		try:
 			j = self.jobs[job_id]
 		except:
-			log.info("Job id '%s' not found" % job_id)
+			log.info("Job id '%s' not found, worker_name: '%s'" % (job_id, worker_name))
+			if ip:
+				log.info("Worker submited invalid Job id: IP %s", str(ip))
+
 			return None
 
 		# Now we have to check if job is still valid.
@@ -163,23 +166,31 @@ class TemplateRegistry(object):
 
 		return j
 
-	def submit_share(self, job_id, worker_name, session, extranonce1_bin, extranonce2, ntime, nonce, difficulty):
+	def submit_share(self, job_id, worker_name, session, extranonce1_bin, extranonce2, ntime, nonce, difficulty, ip=False):
 		'''Check parameters and finalize block template. If it leads
 			to valid block candidate, asynchronously submits the block
 			back to the bitcoin network.
 
 			- extranonce1_bin is binary. No checks performed, it should be from session data
 			- job_id, extranonce2, ntime, nonce - in hex form sent by the client
-			- difficulty - decimal number from session, again no checks performed
+			- difficulty - decimal number from session
 			- submitblock_callback - reference to method which receive result of submitblock()
+			- difficulty is checked to see if its lower than the vardiff minimum target or pool target
+			  from conf/config.py and if it is the share is rejected due to it not meeting the requirements for a share
+			  
 		'''
+
+		# Share Difficulty should never be 0 or below
+		if difficulty <= 0 :
+			log.exception("Worker %s @ IP: %s seems to be submitting Fake Shares"%(worker_name,ip))
+			raise SubmitException("Diff is %s Share Rejected Reporting to Admin"%(difficulty))
 
 		# Check if extranonce2 looks correctly. extranonce2 is in hex form...
 		if len(extranonce2) != self.extranonce2_size * 2:
 			raise SubmitException("Incorrect size of extranonce2. Expected %d chars" % (self.extranonce2_size*2))
 
 		# Check for job
-		job = self.get_job(job_id)
+		job = self.get_job(job_id, worker_name, ip)
 		if job == None:
 			if settings.REJECT_STALE_SHARES:
 				# Reject stale share
@@ -244,6 +255,10 @@ class TemplateRegistry(object):
 
 		# Algebra tells us the diff_to_target is the same as hash_to_diff
 		share_diff = int(self.diff_to_target(block_hash['int']))
+
+		log.debug("share_diff: %s" % share_diff)
+		log.debug("job.target: %s" % job.target)
+		log.debug("block_hash_int: %s" % block_hash['int'])
 
 		# 6. Compare hash with target of the network
 		if block_hash['int'] <= job.target:

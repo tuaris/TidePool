@@ -9,6 +9,7 @@ import thor_scrypt.thor_scrypt as thor_scrypt
 import vtc_scrypt.vtc_scrypt as vtc_scrypt
 import quark.quark_hash as quark_hash
 import max_hash.max_hash as max_hash
+import X11.X11_hash as X11_hash
 import sha3
 import skeinhash
 
@@ -33,6 +34,9 @@ def make_header_hash_thor_scryptjane(header, nTime=None):
 def make_header_hash_quark(header):
 	return quark_hash.getPoWHash(header)
 
+def make_header_hash_X11(header):
+	return X11_hash.getPoWHash(header)
+
 def make_header_hash_skeinhash(header):
 	return skeinhash.skeinhash(header)
 
@@ -49,6 +53,8 @@ def make_header_hash_sha3(header):
 	return s.hexdigest()
 
 
+
+# MAX Difficulty aka. diff1, found in block.nBits
 def get_diff_hex_sha256():
 	return 0x00000000ffff0000000000000000000000000000000000000000000000000000
 
@@ -69,6 +75,9 @@ def get_diff_hex_thor_scryptjane():
 
 def get_diff_hex_quark():
 	return 0x000000ffff000000000000000000000000000000000000000000000000000000
+
+def get_diff_hex_X11():
+	return 0x0000ffff00000000000000000000000000000000000000000000000000000000
 
 def get_diff_hex_skeinhash():
 	return 0x00000000ffff0000000000000000000000000000000000000000000000000000

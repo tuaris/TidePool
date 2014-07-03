@@ -31,4 +31,8 @@ cd ../sha3
 python setup.py build_ext --inplace
 python setup.py clean
 
+cd ../X11
+python setup.py build_ext --inplace
+python setup.py clean
+
 cd ../../../scripts
