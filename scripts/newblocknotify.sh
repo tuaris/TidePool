@@ -14,10 +14,11 @@ if (-e ${PIDFILE}) then
 	#verify if the process is actually still running under this pid
 	set PID=`cat ${PIDFILE}`
 
-	ps -p "$PID" >/dev/null 2&>1
+	ps -p "$PID" >&/dev/null
 	# somebody else is running the script ?
-	if ($? -eq 0) then
-		exit 0
+	if ($? == 0) then
+		echo "Notification already running as pid $PID"
+		exit 1
 	endif
 
 	# put the current process as owner of the lock
@@ -34,8 +35,14 @@ set PORT=$2
 set PASSWORD=$3
 
 # Use NETCAT to send the JSON message
-echo '{"id": 1, "method": "mining.update_block", "params": ["'${PASSWORD}'"]}' | nc ${HOST} ${PORT}
+printf '{"id": 1, "method": "mining.update_block", "params": ["'${PASSWORD}'"]}\n' | nc ${HOST} ${PORT} -i 1
+
+# Check result
+set FINAL_EXIT_CODE=$?
+if ($FINAL_EXIT_CODE != 0) then
+	echo "Notification falied!"
+endif
 
 # last lines of script - release lock file
 rm -f ${PIDFILE}
-exit 0
+exit $FINAL_EXIT_CODE

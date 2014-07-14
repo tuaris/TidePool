@@ -1,0 +1,1 @@
+/usr/local/libexec/newblocknotify host port pass | /usr/local/libexec/timestamper >> /var/log/blocknotify/notify.log

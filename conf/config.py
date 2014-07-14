@@ -36,6 +36,7 @@ HOSTNAME = config_file_parser.get('Service', 'HOSTNAME')
 LISTEN_SOCKET_TRANSPORT = config_file_parser.getint('Service', 'LISTEN_SOCKET_TRANSPORT')
 PASSWORD_SALT = config_file_parser.get('Service', 'PASSWORD_SALT')
 ADMIN_PASSWORD = config_file_parser.get('Service', 'ADMIN_PASSWORD')
+ADMIN_RESTRICT_INTERFACE = config_file_parser.get('Service', 'ADMIN_RESTRICT_INTERFACE')
 
 ENABLE_EXAMPLE_SERVICE = True
 LISTEN_HTTP_TRANSPORT = None
