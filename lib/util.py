@@ -231,6 +231,8 @@ def get_hash_hex(header_bin, ntime):
 		header_hex = header_hex+"000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000"
 	elif settings.COINDAEMON_ALGO == 'X11':
 		header_hex = header_hex+"000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000"
+	elif settings.COINDAEMON_ALGO == 'X15':
+		header_hex = header_hex+"000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000"
 	else: pass
 
 	# 5. Get hash in binary format from header according to algorythm (by Reversing the header)
@@ -248,6 +250,8 @@ def get_hash_hex(header_bin, ntime):
 	elif settings.COINDAEMON_ALGO == 'quark':
 		hash_bin = algo_interface.make_header_hash_quark(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))
 	elif settings.COINDAEMON_ALGO == 'X11':
+		hash_bin = algo_interface.make_header_hash_X11(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))
+	elif settings.COINDAEMON_ALGO == 'X15':
 		hash_bin = algo_interface.make_header_hash_X11(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))
 	elif settings.COINDAEMON_ALGO == 'max':
 		hash_bin = algo_interface.make_header_hash_max(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))[0:33]
@@ -318,6 +322,8 @@ def make_header_hash(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNon
 		header_hash = algo_interface.make_header_hash_quark(''.join(header))
 	elif settings.COINDAEMON_ALGO == 'X11':
 		header_hash = algo_interface.make_header_hash_X11(''.join(header))
+	elif settings.COINDAEMON_ALGO == 'X15':
+		header_hash = algo_interface.make_header_hash_X15(''.join(header))
 	elif settings.COINDAEMON_ALGO == 'skeinhash':
 		header_hash = algo_interface.make_header_hash_skeinhash(''.join(header))
 	elif settings.COINDAEMON_ALGO == 'max':
@@ -346,6 +352,8 @@ def get_diff_hex():
 		diff1 = algo_interface.get_diff_hex_quark()
 	elif settings.COINDAEMON_ALGO == 'X11':
 		diff1 = algo_interface.get_diff_hex_X11()
+	elif settings.COINDAEMON_ALGO == 'X15':
+		diff1 = algo_interface.get_diff_hex_X15()
 	elif settings.COINDAEMON_ALGO == 'skeinhash':
 		diff1 = algo_interface.get_diff_hex_skeinhash()
 	elif settings.COINDAEMON_ALGO == 'max':

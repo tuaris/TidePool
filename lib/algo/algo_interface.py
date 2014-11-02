@@ -10,6 +10,7 @@ import vtc_scrypt.vtc_scrypt as vtc_scrypt
 import quark.quark_hash as quark_hash
 import max_hash.max_hash as max_hash
 import X11.X11_hash as X11_hash
+import X15.X15_hash as X15_hash
 import sha3
 import skeinhash
 
@@ -36,6 +37,9 @@ def make_header_hash_quark(header):
 
 def make_header_hash_X11(header):
 	return X11_hash.getPoWHash(header)
+
+def make_header_hash_X15(header):
+	return X15_hash.getPoWHash(header)
 
 def make_header_hash_skeinhash(header):
 	return skeinhash.skeinhash(header)
@@ -77,6 +81,9 @@ def get_diff_hex_quark():
 	return 0x000000ffff000000000000000000000000000000000000000000000000000000
 
 def get_diff_hex_X11():
+	return 0x0000ffff00000000000000000000000000000000000000000000000000000000
+
+def get_diff_hex_X15():
 	return 0x0000ffff00000000000000000000000000000000000000000000000000000000
 
 def get_diff_hex_skeinhash():
