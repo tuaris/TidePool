@@ -252,7 +252,7 @@ def get_hash_hex(header_bin, ntime):
 	elif settings.COINDAEMON_ALGO == 'X11':
 		hash_bin = algo_interface.make_header_hash_X11(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))
 	elif settings.COINDAEMON_ALGO == 'X15':
-		hash_bin = algo_interface.make_header_hash_X11(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))
+		hash_bin = algo_interface.make_header_hash_X15(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))
 	elif settings.COINDAEMON_ALGO == 'max':
 		hash_bin = algo_interface.make_header_hash_max(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ]))[0:33]
 	elif settings.COINDAEMON_ALGO == 'skeinhash':

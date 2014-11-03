@@ -254,7 +254,10 @@ class TemplateRegistry(object):
 			log.info("Yay, share with diff above 100000")
 
 		# Algebra tells us the diff_to_target is the same as hash_to_diff
-		share_diff = int(self.diff_to_target(block_hash['int']))
+		if settings.VDIFF_FLOAT:
+			share_diff = float(self.diff_to_target(block_hash['int']))
+		else:
+			share_diff = int(self.diff_to_target(block_hash['int']))
 
 		log.debug("share_diff: %s" % share_diff)
 		log.debug("job.target: %s" % job.target)
