@@ -1,4 +1,5 @@
 #!/bin/sh
+
 cd ../lib/algo/ltc_scrypt
 python setup.py build_ext --inplace
 python setup.py clean
@@ -32,6 +33,10 @@ python setup.py build_ext --inplace
 python setup.py clean
 
 cd ../X11
+python setup.py build_ext --inplace
+python setup.py clean
+
+cd ../X13
 python setup.py build_ext --inplace
 python setup.py clean
 
