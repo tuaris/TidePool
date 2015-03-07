@@ -73,6 +73,15 @@ DB_STATS_AVG_TIME = 300		# When using the DATABASE_EXTEND option, average speed 
 DB_USERCACHE_TIME = 600		# How long the usercache is good for before we refresh
 DB_STATS_ENABLE = False		# Decides whether or not this process is responisble for updating pool statistics.
 
+# When the share queue gets large, more threads will be swaned up to this amount
+# Set to 1 to disable
+try:
+	DB_MAX_IMPORT_THREADS = config_file_parser.getint('Advanced', 'DB_MAX_IMPORT_THREADS')
+	if DB_MAX_IMPORT_THREADS < 1:
+		DB_MAX_IMPORT_THREADS = 1
+except:
+	DB_MAX_IMPORT_THREADS = 3
+
 # ******************** Adv. Pool Settings *********************
 USERS_AUTOADD = True		# Automatically add users to db when they connect.
 USERS_CHECK_PASSWORD = False	# Check the workers password? (Many pools don't)
@@ -89,7 +98,7 @@ MERKLE_REFRESH_INTERVAL = config_file_parser.getint('Pool', 'MERKLE_REFRESH_INTE
 VDIFF_X2_TYPE = False  # powers of 2 e.g. 2,4,8,16,32,64,128,256,512,1024 (BROKEN)
 USE_COINDAEMON_DIFF = False   # Set the maximum difficulty to the litecoin difficulty. 
 DIFF_UPDATE_FREQUENCY = 86400 # Update the litecoin difficulty once a day for the VARDIFF maximum
-ALLOW_EXTERNAL_DIFFICULTY = False 
+ALLOW_EXTERNAL_DIFFICULTY = config_file_parser.getboolean('Pool', 'EXTERNAL_DIFFICULTY')  # Allows direct difficulty updating via database
 
 VDIFF_FLOAT = config_file_parser.getboolean('Pool', 'VDIFF_FLOAT')
 VARIABLE_DIFF = config_file_parser.getboolean('Pool', 'VARIABLE_DIFF')
@@ -117,6 +126,13 @@ VDIFF_VARIANCE_PERCENT = config_file_parser.getint('Pool', 'VDIFF_VARIANCE_PERCE
 SOLUTION_BLOCK_HASH = config_file_parser.getboolean('Advanced', 'SOLUTION_BLOCK_HASH')
 BLOCK_CHECK_ALGO_HASH = config_file_parser.getboolean('Advanced', 'BLOCK_CHECK_ALGO_HASH')
 REJECT_STALE_SHARES = config_file_parser.getboolean('Advanced', 'REJECT_STALE_SHARES')
+
+# Defaults to Yes if no value is set
+try:
+	SAVE_SHARES = config_file_parser.getboolean('Advanced', 'SAVE_SHARES')
+except:
+	SAVE_SHARES = True
+
 # ******************** Stats Settings *********************
 
 BASIC_STATS = False		# Enable basic stats page. This has stats for ALL users. (Unessesary)

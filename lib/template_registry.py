@@ -139,8 +139,7 @@ class TemplateRegistry(object):
 
 	def diff_to_target(self, difficulty):
 		'''Converts difficulty to target'''
-		diff1 = util.get_diff_hex();
-		return diff1 / difficulty
+		return util.get_diff_target(difficulty);
 
 	def get_job(self, job_id, worker_name, ip=False):
 		'''For given job_id returns BlockTemplate instance or None'''
@@ -179,6 +178,7 @@ class TemplateRegistry(object):
 			  from conf/config.py and if it is the share is rejected due to it not meeting the requirements for a share
 			  
 		'''
+		log.debug("Session: %s" % session)
 
 		# Share Difficulty should never be 0 or below
 		if difficulty <= 0 :
@@ -202,15 +202,17 @@ class TemplateRegistry(object):
 				return (None, None, None, None)
 
 		# Check if ntime looks correct
-		if len(ntime) != 8:
-			raise SubmitException("Incorrect size of ntime. Expected 8 chars")
+		check_result, error_message = util.check_ntime(ntime)
+		if not check_result:
+			raise SubmitException(error_message)
 
 		if not job.check_ntime(int(ntime, 16)):
 			raise SubmitException("Ntime out of range")
 
 		# Check nonce
-		if len(nonce) != 8:
-			raise SubmitException("Incorrect size of nonce. Expected 8 chars")
+		check_result, error_message = util.check_nonce(nonce)
+		if not check_result:
+			raise SubmitException(error_message)
 
 		# Check for duplicated submit
 		if not job.register_submit(extranonce1_bin, extranonce2, ntime, nonce):
@@ -223,8 +225,10 @@ class TemplateRegistry(object):
 
 		# 0. Some sugar
 		extranonce2_bin = binascii.unhexlify(extranonce2)
-		ntime_bin = binascii.unhexlify(ntime)
-		nonce_bin = binascii.unhexlify(nonce)
+		ntime_bin = util.get_ntime_bin(ntime)
+		nonce_bin = util.get_nonce_bin(nonce)
+		target_user = self.diff_to_target(difficulty)
+		target_info = self.diff_to_target(100000)
 
 		# 1. Build coinbase
 		coinbase_bin = job.serialize_coinbase(extranonce1_bin, extranonce2_bin)
@@ -238,20 +242,18 @@ class TemplateRegistry(object):
 		header_bin = job.serialize_header(merkle_root_int, ntime_bin, nonce_bin)
 
 		# 4. Convert header into hex according to hash algorythim
-		block_hash = util.get_hash_hex(header_bin, ntime)
+		block_hash = util.get_hash_hex(header_bin, ntime, nonce)
 
-		target_user = self.diff_to_target(difficulty)
+		# 5a Compare it with target of the user
+		check_result, message = util.check_header_target(block_hash['int'], target_user)
+		if not check_result:
+			log.debug("Oops, somthing is wrong: target_user=%s, difficulty=%s, share_diff=%s" % (target_user, difficulty, int(self.diff_to_target(block_hash['int']))))
+			raise SubmitException("%s. Hash: %s" % (message, block_hash['hex']))
 
-		# 5. Compare it with target of the user
-		if block_hash['int'] > target_user and \
-		( 'prev_jobid' not in session or session['prev_jobid'] < job_id \
-		or 'prev_diff' not in session or block_hash['int'] > self.diff_to_target(session['prev_diff']) ):
-			raise SubmitException("Share is above target. Hash: %s" % block_hash['hex'])
-
-		# Mostly for debugging purposes
-		target_info = self.diff_to_target(100000)
-		if block_hash['int'] <= target_info:
-			log.info("Yay, share with diff above 100000")
+		# Mostly for debugging purposes, just a celebratory message that's being carried over from older versions
+		check_result, message = util.check_above_yay_target(block_hash['int'], target_info)
+		if check_result:
+			log.info(message)
 
 		# Algebra tells us the diff_to_target is the same as hash_to_diff
 		if settings.VDIFF_FLOAT:
@@ -264,15 +266,14 @@ class TemplateRegistry(object):
 		log.debug("block_hash_int: %s" % block_hash['int'])
 
 		# 6. Compare hash with target of the network
-		if block_hash['int'] <= job.target:
-			# Yay! It is block candidate! 
-			#log.info("We found a block candidate! BIN: %s, INT: %s" % (hash_bin[::-1].encode('hex_codec'), "%064x" % hash_int))
+		if util.is_block_candidate(block_hash['int'], job.target):
+			# Yay! It is block candidate!
 			log.info("We found a block candidate! %s | %s" % (block_hash['hex'], block_hash['check_hex']))
 
 			# 7. Finalize and serialize block object 
 			job.finalize(merkle_root_int, extranonce1_bin, extranonce2_bin, int(ntime, 16), int(nonce, 16))
 
-			if not job.is_valid():
+			if not job.is_valid(difficulty):
 				# Should not happen
 				log.exception("FINAL JOB VALIDATION FAILED!(Try enabling/disabling tx messages)")
 

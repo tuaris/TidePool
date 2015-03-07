@@ -61,6 +61,15 @@ def uint256_from_compact(c):
 	v = (c & 0xFFFFFFL) << (8 * (nbytes - 3))
 	return v
 
+# Added to satisfy riecoin changes, becuase I don't know how this effects existing fuciontion
+def uint256_from_compact_alt(c):
+	nbytes = (c >> 24) & 0xFF
+	if nbytes <= 3:
+		v = (c & 0xFFFFFFL) >> (8 * (3 - nbytes))
+	else:
+		v = (c & 0xFFFFFFL) << (8 * (nbytes - 3))
+	return v
+
 def deser_vector(f, c):
 	nit = struct.unpack("<B", f.read(1))[0]
 	if nit == 253:
@@ -217,7 +226,7 @@ def ser_number(n):
 	s.append(n)
 	return bytes(s)
 
-def get_hash_hex(header_bin, ntime):
+def get_hash_hex(header_bin, ntime, nonce):
 	# Other algorythm types build upon SHA256
 	header_hex = binascii.hexlify(header_bin) #Header in HEX
 	hash_bin_sha256 = doublesha(''.join([ header_bin[i*4:i*4+4][::-1] for i in range(0, 20) ])) #Binary Block Hash
@@ -235,6 +244,8 @@ def get_hash_hex(header_bin, ntime):
 		header_hex = header_hex+"000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000"
 	elif settings.COINDAEMON_ALGO == 'X15':
 		header_hex = header_hex+"000000800000000000000000000000000000000000000000000000000000000000000000000000000000000080020000"
+	elif settings.COINDAEMON_ALGO == 'riehash':
+		header_hex = header_hex+"00000080000000000000000080030000"
 	else: pass
 
 	# 5. Get hash in binary format from header according to algorythm (by Reversing the header)
@@ -269,6 +280,11 @@ def get_hash_hex(header_bin, ntime):
 	# The potential block hash in interger value
 	hash_int = uint256_from_str(hash_bin)
 
+	# Extra processing of the 'hash_int' variable for reihash
+	if settings.COINDAEMON_ALGO == 'riehash':
+		# This is kind of an ugly hack: we use hash_int to store the number of primes
+		hash_int = algo_interface.make_header_hash_riehash(hash_int, job.target, int(nonce, 16) )
+
 	# The potential block hash in HEX value (in both sha256 and the current coin algorythm)
 	hash_hex_from_algo = "%064x" % hash_int
 	hash_hex_from_sha256 = hash_bin_sha256[::-1].encode('hex_codec')
@@ -300,15 +316,72 @@ def script_to_pubkey(key):
 	if len(key) != 33: raise Exception('Invalid Address')
 	return b'\x21' + key + b'\xac'
 
-def make_header_hash(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce):
-	# At the moment, all algorythims seem to use the same structure for the header
+def deserialize_header(header):
+	nVersion = struct.unpack("<i", header.read(4))[0]
+	hashPrevBlock = deser_uint256(header)
+	hashMerkleRoot = deser_uint256(header)
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		nBits = struct.unpack("<I", header.read(4))[0]
+		nTime = struct.unpack("<II", header.read(8))[0]
+		nNonce = struct.unpack("<IIIIIIII", header.read(32))[0]
+	else:
+		nTime = struct.unpack("<I", header.read(4))[0]
+		nBits = struct.unpack("<I", header.read(4))[0]
+		nNonce = struct.unpack("<I", header.read(4))[0]
+
+	return nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce
+
+def deserialize_header_as_string(data):
+	height = data['height']
+	nVersion = data['version']
+	hashPrevBlock = int(data['previousblockhash'], 16)
+	nBits = int(data['bits'], 16)
+	hashMerkleRoot = 0
+	nTime = 0
+	nNonce = 0
+
+	return height, nVersion, hashPrevBlock, nBits, hashMerkleRoot, nTime, nNonce
+
+def serialize_header_as_string(nVersion, prevhash_bin, merkle_root_int, ntime_bin, nBits, nonce_bin):
+	header  = struct.pack(">i", nVersion)
+	header += prevhash_bin
+	header += ser_uint256_be(merkle_root_int)
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		header += struct.pack(">I", nBits)
+		header += ntime_bin
+	else:
+		header += ntime_bin
+		header += struct.pack(">I", nBits)
+
+	header += nonce_bin
+
+	return header
+
+def serialize_header(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce):
+	# Header structure according to algorythm
+
+	# Common to all algos
 	header = []
 	header.append(struct.pack("<i", nVersion))
 	header.append(ser_uint256(hashPrevBlock))
 	header.append(ser_uint256(hashMerkleRoot))
-	header.append(struct.pack("<I", nTime))
-	header.append(struct.pack("<I", nBits))
-	header.append(struct.pack("<I", nNonce))
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		header.append(struct.pack("<I", nBits))
+		header.append(struct.pack("<Q", nTime))
+		header.append(ser_uint256(nNonce))
+	else:
+		# The reset all use the same structure
+		header.append(struct.pack("<I", nTime))
+		header.append(struct.pack("<I", nBits))
+		header.append(struct.pack("<I", nNonce))
+
+	return header
+
+def make_header_hash(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce, difficulty = None):
+	header = serialize_header(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce)
 
 	# Genorate's the header hash of a block according to selected algorythm
 	if settings.COINDAEMON_ALGO == 'scrypt':
@@ -332,6 +405,9 @@ def make_header_hash(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNon
 		header_hash = algo_interface.make_header_hash_X15(''.join(header))
 	elif settings.COINDAEMON_ALGO == 'skeinhash':
 		header_hash = algo_interface.make_header_hash_skeinhash(''.join(header))
+	elif settings.COINDAEMON_ALGO == 'riehash':
+		# Riehash is so diffrent :-)
+		header_hash = util.doublesha(''.join([ header[i*4:i*4+4][::-1] for i in range(0, 20) ]))
 	elif settings.COINDAEMON_ALGO == 'max':
 		header_hash = algo_interface.make_header_hash_max(''.join(header))
 	elif settings.COINDAEMON_ALGO == 'keccak':
@@ -339,10 +415,15 @@ def make_header_hash(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNon
 	else: #SHA256
 		header_hash = algo_interface.make_header_hash_sha256(''.join(header))
 
-	return uint256_from_str(header_hash)
+	if settings.COINDAEMON_ALGO == 'riehash':
+		header_hash = algo_interface.make_header_hash_riehash(uint256_from_str(header_hash), nNonce, difficulty)
+	else:
+		header_hash = uint256_from_str(header_hash)
 
-def get_diff_hex():
-	# Get the diff in HEX according to selected algorythm
+	return header_hash
+
+def get_diff_target(difficulty):
+	# Get the diff1 in HEX according to selected algorythm
 	if settings.COINDAEMON_ALGO == 'scrypt':
 		diff1 = algo_interface.get_diff_hex_scrypt()
 	elif settings.COINDAEMON_ALGO  == 'scrypt-jane':
@@ -364,6 +445,8 @@ def get_diff_hex():
 		diff1 = algo_interface.get_diff_hex_X15()
 	elif settings.COINDAEMON_ALGO == 'skeinhash':
 		diff1 = algo_interface.get_diff_hex_skeinhash()
+	elif settings.COINDAEMON_ALGO == 'riehash':
+		diff1 = algo_interface.get_diff_hex_riehash(difficulty)
 	elif settings.COINDAEMON_ALGO == 'max':
 		diff1 = algo_interface.get_diff_hex_max()
 	elif settings.COINDAEMON_ALGO == 'keccak':
@@ -371,7 +454,14 @@ def get_diff_hex():
 	else: #SHA256
 		diff1 = algo_interface.get_diff_hex_sha256()
 
-	return diff1
+	# Convert diff1 to target
+	if settings.COINDAEMON_ALGO == 'riehash':
+		# No conversion needed for this algo
+		diff = diff1
+	else: 
+		diff = diff1 / difficulty
+
+	return diff
 
 def get_coinbase_hash(coinbase_bin):
 	# Build coinbase based on selected algorythm
@@ -382,3 +472,116 @@ def get_coinbase_hash(coinbase_bin):
 	else: #all others
 		coinbase_hash = doublesha(coinbase_bin)
 	return coinbase_hash
+
+def get_target(nBits):
+	if settings.COINDAEMON_ALGO == 'riehash':
+		target = settings.POOL_TARGET
+	else:
+		target = uint256_from_compact(nBits)
+
+	return target
+
+def get_target_rpc(nBits):
+	if settings.COINDAEMON_ALGO == 'riehash':
+		target = uint256_from_compact_alt(nBits)
+	else:
+		target = uint256_from_compact(nBits)
+
+	return target
+
+def get_ntime_bin(ntime):
+	ntime_bin = binascii.unhexlify(ntime)
+	if settings.COINDAEMON_ALGO == 'riehash':
+		# Extra work required for this algo
+		ntime_bin = (''.join([ ntime_bin[(1-i)*4:(1-i)*4+4] for i in range(0, 2) ]))
+
+	return ntime_bin
+
+def get_nonce_bin(nonce):
+	nonce_bin = binascii.unhexlify(nonce)
+	if settings.COINDAEMON_ALGO == 'riehash':
+		# Extra work required for this algo
+		nonce_bin = (''.join([ nonce_bin[(7-i)*4:(7-i)*4+4] for i in range(0, 8) ]))
+
+	return nonce_bin
+
+def check_nonce(nonce):
+	# Initial value
+	check_result = True
+	message = ''
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		if len(nonce) != 64:
+			check_result = False
+			message = "Incorrect size of nonce. Expected 64 chars"
+	else:
+		if len(nonce) != 8:
+			check_result = False
+			message = "Incorrect size of nonce. Expected 8 chars"
+
+	return check_result, message
+
+def check_ntime(ntime):
+	# Initial value
+	check_result = True
+	message = ''
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		if len(ntime) != 16:
+			check_result = False
+			message = "Incorrect size of ntime. Expected 16 chars"
+	else:
+		if len(ntime) != 8:
+			check_result = False
+			message = "Incorrect size of ntime. Expected 8 chars"
+
+	return check_result, message
+
+def check_header_target(header_hash_int, target):
+	# Initial value
+	check_result = True
+	message = ''
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		if header_hash_int < target:
+			check_result = False
+			message = 'Share does not meet target'
+	else:
+		if header_hash_int > target:
+			check_result = False
+			message = 'Share is above target'
+
+	return check_result, message
+
+def check_above_yay_target(header_hash_int, target):
+	# Mostly for debugging purposes
+	# Valid only for certain alogrythms
+	# Just a celebratory message that's being carried over
+
+	# Initial value
+	check_result = False
+	message = ''
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		check_result = False
+		message = 'Not valid for riehash'
+	else:
+		if header_hash_int <= target:
+			check_result = True
+			message = 'Yay, share with diff above 100000'
+
+	return check_result, message
+
+def is_block_candidate(header_hash_int, target):
+	# Checks if this block hash is a block canidate
+	isBlockCandidate = False
+
+	if settings.COINDAEMON_ALGO == 'riehash':
+		# For riehash, it's hard coded to 6 (may be adjustable later)
+		if header_hash_int == 6:
+			isBlockCandidate = True
+	else:
+		if header_hash_int <= target:
+			isBlockCandidate = True
+
+	return isBlockCandidate

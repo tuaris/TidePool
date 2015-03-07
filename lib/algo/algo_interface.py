@@ -12,6 +12,7 @@ import max_hash.max_hash as max_hash
 import X11.X11_hash as X11_hash
 import X13.X13_hash as X13_hash
 import X15.X15_hash as X15_hash
+import riehash.riehash as riehash
 import sha3
 import skeinhash
 
@@ -47,6 +48,9 @@ def make_header_hash_X15(header):
 
 def make_header_hash_skeinhash(header):
 	return skeinhash.skeinhash(header)
+
+def make_header_hash_riehash(header, nTime, diff):
+	return riehash.getPoWHash(header, diff, nTime)
 
 def make_header_hash_max(header):
 	#return max_hash.getPoWHash(header)
@@ -85,7 +89,7 @@ def get_diff_hex_quark():
 	return 0x000000ffff000000000000000000000000000000000000000000000000000000
 
 def get_diff_hex_X11():
-	return 0x0000ffff00000000000000000000000000000000000000000000000000000000
+	return 0x00000ffff0000000000000000000000000000000000000000000000000000000
 
 def get_diff_hex_X13():
 	return 0x00000ffff0000000000000000000000000000000000000000000000000000000
@@ -95,6 +99,9 @@ def get_diff_hex_X15():
 
 def get_diff_hex_skeinhash():
 	return 0x00000000ffff0000000000000000000000000000000000000000000000000000
+
+def get_diff_hex_riehash(difficulty):
+	return difficulty
 
 def get_diff_hex_max():
 	return 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000

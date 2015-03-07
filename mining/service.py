@@ -57,6 +57,43 @@ class MiningService(GenericService):
 		return True 
 
 	@admin
+	def update_worker_diff(self, worker_name):
+		'''This RPC call will reset a worker's diff to the value in the database
+		See blocknotify.sh in /scripts/ for more info.'''
+
+		log.info("Worker diff update request received")
+
+		# Load new difficulty from database
+		(is_ext_diff, new_difficulty) = Interfaces.worker_manager.get_user_difficulty(worker_name)
+		log.info("Loaded requested worker: %s for: difficulty %s" % (str(worker_name), new_difficulty))
+
+		if not is_ext_diff:
+			log.warning("Difficulty request invalid.  Worker %s is set to VARDIFF" % worker_name)
+			return False
+
+		if new_difficulty < settings.VDIFF_MIN_TARGET:
+			log.warning("Difficulty request invalid. Want: %s but VDIFF_MIN_TARGET is %s" % (str(new_difficulty), settings.VDIFF_MIN_TARGET))
+			# Don't do anything if the new difficulty is invalid
+			return False
+
+		# Locate the connection refernce for the requested worker_name in the subscriptions, 
+		# update the difficulty when found
+		for subscription in Pubsub.iterate_subscribers(self.event):
+			try:
+				if subscription != None:
+					session = subscription.connection_ref().get_session()
+					session.setdefault('authorized', {})
+					if worker_name == session['authorized'].keys()[0]:
+						# Found it! Set new difficulty
+						Interfaces.share_limiter.set_worker_difficulty(subscription.connection_ref, new_difficulty, worker_name, True)
+
+			except Exception as e:
+				log.warning("Subscription lookup failed %s" % str(e))
+				pass
+
+		return True 
+
+	@admin
 	def add_coind(self, *args):
 		''' Function to add a coind instance live '''
 		if len(args) != 4:
@@ -83,12 +120,18 @@ class MiningService(GenericService):
 			session['authorized'][worker_name] = worker_password
 			is_ext_diff = False
 			if settings.ALLOW_EXTERNAL_DIFFICULTY:
-				(is_ext_diff, session['difficulty']) = Interfaces.worker_manager.get_user_difficulty(worker_name)
-				self.connection_ref().rpc('mining.set_difficulty', [session['difficulty'], ], is_notification=True)
+				(is_ext_diff, worker_difficulty_from_db) = Interfaces.worker_manager.get_user_difficulty(worker_name)
+				if is_ext_diff:
+					log.info("Setting authorized worker %s to difficulty %s" % (str(worker_name), worker_difficulty_from_db))
+					# This is key: It sets the worker's difficutly from the database value upon authorization
+					Interfaces.share_limiter.set_worker_difficulty(self.connection_ref, worker_difficulty_from_db, worker_name, True)
+				else:
+					log.info("Authorized worker %s is using VARDIFF leaving difficulty as: %s" % (str(worker_name), session['difficulty']))
+					self.connection_ref().rpc('mining.set_difficulty', [session['difficulty'], ], is_notification=True)
 			else:
 				session['difficulty'] = settings.POOL_TARGET
-			# worker_log = (valid, invalid, is_banned, diff, is_ext_diff, timestamp)
-			Interfaces.worker_manager.worker_log['authorized'][worker_name] = (0, 0, False, session['difficulty'], is_ext_diff, Interfaces.timestamper.time())			
+
+			Interfaces.worker_manager.worker_log['authorized'][worker_name] = (0, 0, False, session['difficulty'], is_ext_diff, Interfaces.timestamper.time())
 			return True
 		else:
 			ip = self.connection_ref()._get_ip()
@@ -113,8 +156,11 @@ class MiningService(GenericService):
 		extranonce1_hex = binascii.hexlify(extranonce1)
 
 		session = self.connection_ref().get_session()
+		log.debug("Subscribed Session: %s" % session)
+
 		session['extranonce1'] = extranonce1
 		session['difficulty'] = settings.POOL_TARGET  # Following protocol specs, default diff is 1
+		log.info("Initial subscribed worker difficulty set to: %s" % session['difficulty'])
 
 		return Pubsub.subscribe(self.connection_ref(), MiningSubscription()) + (extranonce1_hex, extranonce2_size)
 
@@ -176,7 +222,7 @@ class MiningService(GenericService):
 		# and it is valid proof of work.
 		try:
 			(block_header, block_hash, share_diff, on_submit) = Interfaces.template_registry.submit_share(job_id,
-				worker_name, session, extranonce1_bin, extranonce2, ntime, nonce, difficulty)
+				worker_name, session, extranonce1_bin, extranonce2, ntime, nonce, difficulty, ip)
 		except SubmitException as e:
 			# block_header and block_hash are None when submitted data are corrupted
 			invalid += 1
@@ -186,7 +232,7 @@ class MiningService(GenericService):
 				raise SubmitException("Worker is temporarily banned")
  
 			Interfaces.share_manager.on_submit_share(worker_name, False, False, difficulty,
-				submit_time, False, ip, e[0], 0)   
+				submit_time, False, ip, e[0], 0)
 			raise
 
 		# block_header and block_hash are None when submitted share is stale, but accepted
@@ -200,11 +246,13 @@ class MiningService(GenericService):
 		if is_banned:
 			raise SubmitException("Worker is temporarily banned")
  
-		# block_header and block_hash are None when submitted share is stale, but accepted
+		# block_header and block_hash are None when submitted share is stale, but accepted, however it's not logged
 		if block_header != None:
+			# If there is a block header, then the share is logged
 			Interfaces.share_manager.on_submit_share(worker_name, block_header,
 				block_hash, difficulty, submit_time, True, ip, '', share_diff)
 
+		# if 'on_submit' is set, this means it was a potential block candidate as determined by 'template_registry.submit_share()'
 		if on_submit != None:
 			# Pool performs submitblock() to coind. Let's hook
 			# to result and report it to share manager
