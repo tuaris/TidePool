@@ -53,20 +53,28 @@ class DBInterface():
 		self.usercacheclock = reactor.callLater(settings.DB_USERCACHE_TIME , self.clearusercache)
 
 	def scheduleImport(self):
+		log.debug("Scheduling next queue run check %s seconds from now." % settings.DB_LOADER_CHECKTIME)
 		self.queueclock = reactor.callLater(settings.DB_LOADER_CHECKTIME , self.run_import_thread)
 
 	def scheduleStats(self):
 		self.statsclock = reactor.callLater(settings.DB_STATS_AVG_TIME , self.stats_thread)
 
 	def run_import_thread(self):
-		log.debug("run_import_thread current size: %d", self.QUEUE.qsize())
+		log.debug("Share queue has %d item(s)", self.QUEUE.qsize())
 
 		# Don't incur thread overhead if we're not going to run
-		if self.QUEUE.qsize() >= settings.DB_LOADER_REC_MIN or time.time() >= self.next_force_import_time:
+		# 1. Queue must not be empty
+		# 2. If queue is not empty, then at least one of these two conditions are met
+		# 	a. Queue has at least DB_LOADER_REC_MIN number of items
+		# 	b. It's time to force an import
+		if self.QUEUE.qsize() > 0 and (self.QUEUE.qsize() >= settings.DB_LOADER_REC_MIN or time.time() >= self.next_force_import_time):
 			# Import thread will run, next runtime will be scheduled from within the import_thread function
+			log.debug("Shares queue: import will run at this time.")
 			reactor.callInThread(self.import_thread)
+			log.debug("Shares queue: import process has been requested.")
 		else:
 			# Import thread will not run, we should schedule next runtime
+			log.debug("Shares queue: import not nessecary at this time.")
 			self.scheduleImport()
 
 	def import_thread(self, onetime = False):
@@ -93,41 +101,23 @@ class DBInterface():
 		if not onetime:
 			self.scheduleImport()
 
+	# Statistics are no longer handled by the startum service.  Now done by Backoffice.
 	def stats_thread(self):
 		log.info("Stats thread has started running...")
-		# Create a new database connection for use in this thread
-		# Since this is called Asyncronosly
-		try:
-			database = DB_Mysql.DB_Mysql()
-		except Exception as e:
-			log.error("Stats thread failed: %s" % e.args[0])
-			return
-
 		# Do the deed
-		self.update_stats(database)
-		database.close()
+		self.update_stats()
 
 		# Schedule next runtime
 		self.scheduleStats()
-
-	def _update_pool_info(self, data):
-		self.DATABASE.update_pool_info({ 'blocks' : data['blocks'], 'balance' : data['balance'],
-			'connections' : data['connections'], 'difficulty' : data['difficulty'] })
-
-	def update_stats(self, database):
+	
+	# Statistics are no longer handled by the startum service.  Now done by Backoffice.
+	def update_stats(self):
 		if time.time() > self.nextStatsUpdate:
 			self.nextStatsUpdate = time.time() + settings.DB_STATS_AVG_TIME
 			try:
 				log.info("Stats update running")
-				database.update_hash_rate_stats(settings.DB_STATS_AVG_TIME)
-				self.schedule_pool_info_update()
 			except:
 				log.error("Stats update failed: %s", e.args[0])
-
-	def schedule_pool_info_update(self):
-		if settings.DB_STATS_ENABLE:
-			d = self.bitcoinrpc.getinfo()
-			d.addCallback(self._update_pool_info)
 
 	def do_import(self, dbi, force):
 		log.debug("DBInterface.do_import called. force: %s, queue size: %s", 'yes' if force == True else 'no', self.QUEUE.qsize())
@@ -178,10 +168,10 @@ class DBInterface():
 
 			# try to do the import, if we fail, log the error and put the data back in the queue
 			try:
-				log.debug("Inserting %s Share Records", datacnt)
+				log.debug("Inserting %i Share Records", datacnt)
 				dbi.import_shares(sqldata)
 			except Exception as e:
-				log.error("Insert Share Records Failed: %s", e.args[0])
+				log.error("Insert Share Records Failed.  Error: %s", e.args[0])
 				for k, v in enumerate(sqldata):
 					self.QUEUE.put(v)
 				break  # Allows us to sleep a little

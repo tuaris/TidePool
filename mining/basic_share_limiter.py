@@ -117,20 +117,20 @@ class BasicShareLimiter(object):
 		# Init the stats for this worker if it isn't set.
 		if worker_name not in self.worker_stats or self.worker_stats[worker_name]['last_ts'] < timestamp - settings.DB_USERCACHE_TIME :
 			# Load the worker's difficult as set in the database
-			(is_ext_diff, database_worker_difficulty) = Interfaces.worker_manager.get_user_difficulty(worker_name)
-			log.info("Database difficulty for %s Found as: %s.  Curent diff is: %s Using VARDIFF: %s" % (worker_name, database_worker_difficulty, current_difficulty, ('No' if is_ext_diff else 'Yes')))
+			(use_vardiff, database_worker_difficulty) = Interfaces.worker_manager.get_user_difficulty(worker_name)
+			log.info("Database difficulty for %s Found as: %s.  Curent diff is: %s Using VARDIFF: %s" % (worker_name, database_worker_difficulty, current_difficulty, ('Yes' if use_vardiff else 'No')))
 			# Set it to current difficulty
 			dbi.update_worker_diff(worker_name, current_difficulty)
 			# Cache the information
-			self.worker_stats[worker_name] = {'last_rtc': (timestamp - self.retarget / 2), 'last_ts': timestamp, 'buffer': SpeedBuffer(self.buffersize), 'database_worker_difficulty': database_worker_difficulty, 'is_ext_diff': is_ext_diff}
+			self.worker_stats[worker_name] = {'last_rtc': (timestamp - self.retarget / 2), 'last_ts': timestamp, 'buffer': SpeedBuffer(self.buffersize), 'database_worker_difficulty': database_worker_difficulty, 'use_vardiff': use_vardiff}
 			return
 
 		# Standard share update of data
 		self.worker_stats[worker_name]['buffer'].append(timestamp - self.worker_stats[worker_name]['last_ts'])
 		self.worker_stats[worker_name]['last_ts'] = timestamp
 
-		# If a worker has explicitly requested a difficulty, never retarget
-		if self.worker_stats[worker_name]['is_ext_diff']:
+		# If not using VARDIFF (from cached value) we are done here
+		if not self.worker_stats[worker_name]['use_vardiff']:
 			return
 
 		# Do We retarget? If not, we're done.

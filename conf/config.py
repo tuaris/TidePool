@@ -20,6 +20,13 @@ COINDAEMON_TX_MSG = config_file_parser.getboolean('Basic', 'COINDAEMON_TX_MSG')
 SCRYPTJANE_NAME = config_file_parser.get('Basic', 'SCRYPTJANE_NAME')
 Tx_Message = config_file_parser.get('Basic', 'Tx_Message')
 
+# Masternode Payments - Default to False if not set
+try:
+	MASTERNODE_PAYMENTS = config_file_parser.getboolean('Basic', 'MASTERNODE_PAYMENTS')
+except:
+	MASTERNODE_PAYMENTS = False
+
+
 # ******************** GENERAL SETTINGS ***************
 STRATUM_MINING_PROCESS_NAME = config_file_parser.get('General', 'STRATUM_MINING_PROCESS_NAME')
 DEBUG = config_file_parser.getboolean('General', 'DEBUG')
@@ -126,6 +133,12 @@ VDIFF_VARIANCE_PERCENT = config_file_parser.getint('Pool', 'VDIFF_VARIANCE_PERCE
 SOLUTION_BLOCK_HASH = config_file_parser.getboolean('Advanced', 'SOLUTION_BLOCK_HASH')
 BLOCK_CHECK_ALGO_HASH = config_file_parser.getboolean('Advanced', 'BLOCK_CHECK_ALGO_HASH')
 REJECT_STALE_SHARES = config_file_parser.getboolean('Advanced', 'REJECT_STALE_SHARES')
+
+# Defaults to 20% if no value is set
+try:
+	MASTERNODE_PERCENT = config_file_parser.getint('Advanced', 'MASTERNODE_PERCENT')
+except:
+	MASTERNODE_PERCENT = 20
 
 # Defaults to Yes if no value is set
 try:

@@ -118,7 +118,8 @@ class DB_Mysql():
 	def execute(self, query, args = None):
 		log.debug("Executing Basic Query")
 		log.debug("DB Query: %s" % query)
-		log.debug("DB Values: %s" % args)
+		if not args == None:
+			log.debug("DB Values: %s" % args)
 
 		try:
 			# Ensure all is good
@@ -176,53 +177,6 @@ class DB_Mysql():
 
 		return m.hexdigest()
 
-	def update_hash_rate_stats(self, averageOverTime):
-		log.debug("Updating Hash Rate Stats")
-		# Note: we are using transactions... so we can set the speed = 0 and it doesn't take affect until we are commited.
-		self.execute(
-			"""
-			UPDATE `pool_worker`
-			SET `speed` = 0, 
-			  `alive` = 0
-			"""
-		);
-
-		stime = '%.0f' % (time.time() - averageOverTime);
-
-		self.execute(
-			"""
-			UPDATE `pool_worker` pw
-			LEFT JOIN (
-				SELECT `worker`, SUM(`difficulty`) * 4294967296 / %(average)s AS 'speed'
-				FROM `shares`
-				WHERE `time` > FROM_UNIXTIME(%(time)s)
-				GROUP BY `worker`
-			) AS leJoin
-			ON leJoin.`worker` = pw.`id`
-			SET pw.`alive` = 1, 
-			  pw.`speed` = leJoin.`speed`
-			WHERE pw.`id` = leJoin.`worker`
-			""",
-			{
-				"time": stime,
-				"average": int(averageOverTime) * 1000000
-			}
-		)
-
-		self.execute(
-			"""
-			UPDATE `pool`
-			SET `value` = (
-				SELECT IFNULL(SUM(`speed`), 0)
-				FROM `pool_worker`
-				WHERE `alive` = 1
-			)
-			WHERE `parameter` = 'pool_speed'
-			"""
-		)
-
-		self.MYSQL_CONNECTION.commit()
-
 	def import_shares(self, data):
 		# Data layout
 		# 0: worker_name, 
@@ -242,27 +196,39 @@ class DB_Mysql():
 		total_shares = 0
 		best_diff = 0
 
+		# Analyzes every share one by one - Remember, we are looping through 'shares' (not workers)
+		log.debug("Enumarating shares...")
 		for k, v in enumerate(data):
+			log.debug("Item: %s" % k)
+
+			# Keep a running total (in difficulty)
 			total_shares += v[3]
 
+			# Keeps the 'Last Check-in' field of each worker up to date with the timestamp of the 'most recent' share
 			if v[0] in checkin_times:
-				if v[4] > checkin_times[v[0]]:
+				log.debug("(Worker '%s') this share time: %s. Current checkin_time: %s" % (v[0], v[4], checkin_times[v[0]]))
+				if v[4] > checkin_times[v[0]]["time"]:
 					checkin_times[v[0]]["time"] = v[4]
+					log.debug("New checkin_time for '%s' set to: %s" % (v[0], checkin_times[v[0]]))
 			else:
 				checkin_times[v[0]] = {
 					"time": v[4], 
 					"shares": 0, 
 					"rejects": 0
 				}
+				log.debug("(Worker '%s') checkin_times set to %s" % (v[0], checkin_times[v[0]]))
 
+			# Tally up (toltal difficulty) of valid and invalid shares per worker
 			if v[5] == True:
 				checkin_times[v[0]]["shares"] += v[3]
 			else:
 				checkin_times[v[0]]["rejects"] += v[3]
 
+			# Determines the best share (the one with the hieghest 'difficulty'
 			if v[10] > best_diff:
 				best_diff = v[10]
 
+			# Save the share to the database
 			self.execute(
 				"""
 				INSERT INTO `shares` 
@@ -289,9 +255,12 @@ class DB_Mysql():
 			)
 
 		# Updating some stats
+		log.info("Updating Round Stats")
+		# There may be instances where these values are empty and python will not properly convert them
+		# The work around is to have MySQL do the string to float conversion for us by adding '0'.
 		self.execute(
 			"""
-			SELECT `parameter`, `value` 
+			SELECT `parameter`, `value` + 0 as `value`
 			FROM `pool` 
 			WHERE `parameter` = 'round_best_share'
 			  OR `parameter` = 'round_shares'
@@ -302,12 +271,16 @@ class DB_Mysql():
 
 		current_parameters = {}
 
-		for data in self.MYSQL_CURSOR.fetchall():
-			current_parameters[data[0]] = data[1]
+		log.info("Fetching current stats")
+		for pool_stats in self.MYSQL_CURSOR.fetchall():
+			log.debug("Extracting: %s => %s" % (pool_stats[0], pool_stats[1]))
+			current_parameters[pool_stats[0]] = pool_stats[1]
 
+		# Convert these values into a floating point number
 		round_best_share = float(current_parameters['round_best_share'])
 		difficulty = float(current_parameters['bitcoin_difficulty'])
 		round_shares = float(current_parameters['round_shares']) + total_shares
+		log.debug("round_best_share = %s, difficulty = %s, round_shares = %s" % (round_best_share, difficulty, round_shares))
 
 		updates = [
 			{
@@ -321,6 +294,7 @@ class DB_Mysql():
 		]
 
 		if best_diff > round_best_share:
+			log.debug("Setting new round_best_share to: %s" % best_diff)
 			updates.append({
 				"param": "round_best_share",
 				"value": best_diff
@@ -335,7 +309,9 @@ class DB_Mysql():
 			updates
 		)
 
+		log.info("Updating worker checkin times")
 		for k, v in checkin_times.items():
+			log.debug("Setting worker %s last_checkin time to %s.  (total shares: %s) (total rejects: %s)" % (k, v["time"], v["shares"], v["rejects"]))
 			self.execute(
 				"""
 				UPDATE `pool_worker`
@@ -352,6 +328,7 @@ class DB_Mysql():
 				}
 			)
 
+		log.info("Commiting Data")
 		self.MYSQL_CONNECTION.commit()
 
 	def found_block(self, data):
@@ -615,39 +592,6 @@ class DB_Mysql():
 			return True
 
 		return False
-
-	def update_pool_info(self, pi):
-		self.executemany(
-			"""
-			UPDATE `pool`
-			SET `value` = %(value)s
-			WHERE `parameter` = %(param)s
-			""",
-			[
-				{
-					"param": "bitcoin_blocks",
-					"value": pi['blocks']
-				},
-				{
-					"param": "bitcoin_balance",
-					"value": pi['balance']
-				},
-				{
-					"param": "bitcoin_connections",
-					"value": pi['connections']
-				},
-				{
-					"param": "bitcoin_difficulty",
-					"value": pi['difficulty']
-				},
-				{
-					"param": "bitcoin_infotime",
-					"value": time.time()
-				}
-			]
-		)
-
-		self.MYSQL_CONNECTION.commit()
 
 	def get_worker_diff(self,username):
 		# Defualt Value

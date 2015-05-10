@@ -1,0 +1,2 @@
+from block_pos import CPosBlock
+from block_masternode import CMasterNodeBlock

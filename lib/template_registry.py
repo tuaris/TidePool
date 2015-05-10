@@ -30,24 +30,25 @@ class TemplateRegistry(object):
 	on valid block templates, provide internal interface for stratum
 	service and implements block validation and submits.'''
 
-	def __init__(self, block_template_class, coinbaser, bitcoin_rpc, instance_id,
-				 on_template_callback, on_block_callback):
+	def __init__(self, template_generator, bitcoin_rpc, instance_id, on_template_callback, on_block_callback):
+		log.debug("Got to Template Registry")
+
 		self.prevhashes = {}
 		self.jobs = weakref.WeakValueDictionary()
 
+		self.template_generator = template_generator
+
 		self.extranonce_counter = ExtranonceCounter(instance_id)
-		self.extranonce2_size = block_template_class.coinbase_transaction_class.extranonce_size \
-				- self.extranonce_counter.get_size()
-		log.debug("Got to Template Registry")
-		self.coinbaser = coinbaser
-		self.block_template_class = block_template_class
+		self.extranonce2_size = template_generator.get_extranonce_size() - self.extranonce_counter.get_size()
+
 		self.bitcoin_rpc = bitcoin_rpc
 		self.on_block_callback = on_block_callback
 		self.on_template_callback = on_template_callback
 
-		self.last_block = None
+		self.last_template = None
 		self.update_in_progress = False
-		self.last_update = None
+		self.GBT_RPC_ATTEMPT = None
+		self.last_block_update_start_time = None
 
 		# Create first block template on startup
 		self.update_block()
@@ -62,14 +63,14 @@ class TemplateRegistry(object):
 		'''Returns arguments for mining.notify
 		from last known template.'''
 		log.debug("Getting arguments needed for mining.notify")
-		return self.last_block.broadcast_args
+		return self.last_template.broadcast_args
 
-	def add_template(self, block,block_height):
+	def add_template(self, template, block_height):
 		'''Adds new template to the registry.
 		It also clean up templates which should
 		not be used anymore.'''
 
-		prevhash = block.prevhash_hex
+		prevhash = template.prevhash_hex
 
 		if prevhash in self.prevhashes.keys():
 			new_block = False
@@ -79,13 +80,13 @@ class TemplateRegistry(object):
 
 		# Blocks sorted by prevhash, so it's easy to drop
 		# them on blockchain update
-		self.prevhashes[prevhash].append(block)
+		self.prevhashes[prevhash].append(template)
 
 		# Weak reference for fast lookup using job_id
-		self.jobs[block.job_id] = block
+		self.jobs[template.job_id] = template
 
 		# Use this template for every new request
-		self.last_block = block
+		self.last_template = template
 
 		# Drop templates of obsolete blocks
 		for ph in self.prevhashes.keys():
@@ -105,36 +106,75 @@ class TemplateRegistry(object):
 		#from twisted.internet import reactor
 		#reactor.callLater(10, self.on_block_callback, new_block) 
 
-	def update_block(self):
+	def update_block(self, force = False):
 		'''Registry calls the getblocktemplate() RPC
 		and build new block template.'''
+		log.info("A block update has been requested.")
+
+		if self.update_in_progress and force and not self.GBT_RPC_ATTEMPT is None:
+			# Cancel current block update request (if any)
+			log.warning("Forcing block update.")
+			self.GBT_RPC_ATTEMPT.cancel()
+			self.update_in_progress = False
 
 		if self.update_in_progress:
 			# Block has been already detected
+			log.warning("Block update already in progress.  Started at: %s" % str(self.last_block_update_start_time))
+			# It's possible for this process to get 'hung', lets see how long
+			running_time = max(Interfaces.timestamper.time() - self.last_block_update_start_time , 0)
+			log.info("Block update running for %i seconds" % running_time)
+			# If it's been more than 30 seconds, then cancel it
+			# But we don't run in this instance.
+			if running_time >= 30:
+				log.error("Block update appears to be hung.  Running for more than %i seconds.  Canceling..." % running_time)
+				self.GBT_RPC_ATTEMPT.cancel()
+				self.update_in_progress = False
+
 			return
 
+		log.debug("Block update started.")
 		self.update_in_progress = True
-		self.last_update = Interfaces.timestamper.time()
+		self.last_block_update_start_time = Interfaces.timestamper.time()
 
-		d = self.bitcoin_rpc.getblocktemplate()
-		d.addCallback(self._update_block)
-		d.addErrback(self._update_block_failed)
+		# Polls the upstream network daemon for new block template
+		# This is done asyncronisly
+		self.GBT_RPC_ATTEMPT = self.bitcoin_rpc.getblocktemplate()
+		log.debug("Block template request sent")
+		self.GBT_RPC_ATTEMPT.addCallback(self._update_block)
+		self.GBT_RPC_ATTEMPT.addErrback(self._update_block_failed)
 
 	def _update_block_failed(self, failure):
-		log.error(str(failure))
-		self.update_in_progress = False
+		# Runs when upstream 'getblocktemplate()' RPC call has failed
+		try:
+			log.error("Could not load block template: %s" % str(failure))
+		except:
+			log.error("Could not load block template.")
+		finally:
+			self.update_in_progress = False
 
 	def _update_block(self, data):
-		start = Interfaces.timestamper.time()
+		# Runs when upstream 'getblocktemplate()' RPC call has completed with no error
+		log.debug("Block template data recived: Creating new template...")
+		# Generate a new template
+		template = self.template_generator.new_template(Interfaces.timestamper, JobIdGenerator.get_new_id())
+		# Apply newly obtained template 'data' as recived from upstream network
+		log.debug("Filling RPC Data")
+		template.fill_from_rpc(data)
+		# Add it the template registry
+		log.debug("Adding to Registry")
+		self.add_template(template, data['height'])
 
-		template = self.block_template_class(Interfaces.timestamper, self.coinbaser, JobIdGenerator.get_new_id())
-		log.info(template.fill_from_rpc(data))
-		self.add_template(template,data['height'])
-
-		log.info("Update finished, %.03f sec, %d txes" % \
-					(Interfaces.timestamper.time() - start, len(template.vtx)))
-
+		# All done
+		log.info("Block update finished, %.03f sec, %d txes" % (Interfaces.timestamper.time() - self.last_block_update_start_time, len(template.block.vtx)))
 		self.update_in_progress = False
+
+		'''
+		TODO: Investigate
+		I don't think it is nessesary to return the raw block template data 
+		or anything at all from the '_update_block' function since it's called asyncronosly. 
+
+		Leaving it for now.
+		'''
 		return data
 
 	def diff_to_target(self, difficulty):
@@ -148,7 +188,7 @@ class TemplateRegistry(object):
 		except:
 			log.info("Job id '%s' not found, worker_name: '%s'" % (job_id, worker_name))
 			if ip:
-				log.info("Worker submited invalid Job id: IP %s", str(ip))
+				log.debug("Worker submited invalid Job id: IP %s", str(ip))
 
 			return None
 
@@ -156,11 +196,11 @@ class TemplateRegistry(object):
 		# Unfortunately weak references are not bulletproof and
 		# old reference can be found until next run of garbage collector.
 		if j.prevhash_hex not in self.prevhashes:
-			log.info("Prevhash of job '%s' is unknown" % job_id)
+			log.debug("Prevhash of job '%s' is unknown" % job_id)
 			return None
 
 		if j not in self.prevhashes[j.prevhash_hex]:
-			log.info("Job %s is unknown" % job_id)
+			log.debug("Job %s is unknown" % job_id)
 			return None
 
 		return j
@@ -199,14 +239,14 @@ class TemplateRegistry(object):
 				# Accept stale share but do not continue checking, return a bunch of nothingness
 				log.info("Accepted Stale Share from %s, (%s %s %s %s)" % \
 					(worker_name, binascii.hexlify(extranonce1_bin), extranonce2, ntime, nonce))
-				return (None, None, None, None)
+				return (None, None, None, None, None, None)
 
 		# Check if ntime looks correct
 		check_result, error_message = util.check_ntime(ntime)
 		if not check_result:
 			raise SubmitException(error_message)
 
-		if not job.check_ntime(int(ntime, 16)):
+		if not job.check_ntime(int(ntime, 16), getattr(settings, 'NTIME_AGE')):
 			raise SubmitException("Ntime out of range")
 
 		# Check nonce
@@ -268,7 +308,7 @@ class TemplateRegistry(object):
 		# 6. Compare hash with target of the network
 		if util.is_block_candidate(block_hash['int'], job.target):
 			# Yay! It is block candidate!
-			log.info("We found a block candidate! %s | %s" % (block_hash['hex'], block_hash['check_hex']))
+			log.info("We found a block candidate! for %i: %s | %s" % (job.height, block_hash['hex'], block_hash['check_hex']))
 
 			# 7. Finalize and serialize block object 
 			job.finalize(merkle_root_int, extranonce1_bin, extranonce2_bin, int(ntime, 16), int(nonce, 16))
@@ -284,7 +324,7 @@ class TemplateRegistry(object):
 			if on_submit:
 				self.update_block()
 
-			return (block_hash['header_hex'], block_hash['solution_hex'], share_diff, on_submit)
+			return (block_hash['header_hex'], block_hash['solution_hex'], share_diff, job.prevhash_hex, job.height, on_submit)
 
 		# Not a potential Block
-		return (block_hash['header_hex'], block_hash['solution_hex'], share_diff, None)
+		return (block_hash['header_hex'], block_hash['solution_hex'], share_diff, job.prevhash_hex, job.height, None)

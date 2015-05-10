@@ -1,0 +1,1 @@
+from master_node_vote import CMasterNodeVote

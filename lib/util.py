@@ -217,13 +217,38 @@ def deser_uint256_be(f):
 	return r
 
 def ser_number(n):
-	# For encoding nHeight into coinbase
 	s = bytearray(b'\1')
 	while n > 127:
 		s[0] += 1
 		s.append(n % 256)
 		n //= 256
 	s.append(n)
+	return bytes(s)
+
+def encode_coinbase_nheight(n, min_size = 1):
+	# For encoding nHeight into coinbase
+	# Little Endian
+	# Total size of the returned byte stream is size of n + 1
+	s = bytearray(b'\1')
+
+	# Binarry conversion of n
+	while n > 127:
+		s[0] += 1
+		s.append(n % 256)
+		n //= 256
+
+	# Add to byte array
+	s.append(n)
+
+	# This can never be less that 1 bytes long
+	if min_size < 1:
+		min_size = 1
+
+	# Satisify Minumim Length
+	while len(s) < min_size + 1:
+		s.append(0)
+		s[0] += 1
+
 	return bytes(s)
 
 def get_hash_hex(header_bin, ntime, nonce):
@@ -331,17 +356,6 @@ def deserialize_header(header):
 		nNonce = struct.unpack("<I", header.read(4))[0]
 
 	return nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce
-
-def deserialize_header_as_string(data):
-	height = data['height']
-	nVersion = data['version']
-	hashPrevBlock = int(data['previousblockhash'], 16)
-	nBits = int(data['bits'], 16)
-	hashMerkleRoot = 0
-	nTime = 0
-	nNonce = 0
-
-	return height, nVersion, hashPrevBlock, nBits, hashMerkleRoot, nTime, nNonce
 
 def serialize_header_as_string(nVersion, prevhash_bin, merkle_root_int, ntime_bin, nBits, nonce_bin):
 	header  = struct.pack(">i", nVersion)

@@ -59,15 +59,15 @@ class MiningService(GenericService):
 	@admin
 	def update_worker_diff(self, worker_name):
 		'''This RPC call will reset a worker's diff to the value in the database
-		See blocknotify.sh in /scripts/ for more info.'''
+		See update_worker_diff.sh in /scripts/ for more info.'''
 
 		log.info("Worker diff update request received")
 
 		# Load new difficulty from database
-		(is_ext_diff, new_difficulty) = Interfaces.worker_manager.get_user_difficulty(worker_name)
+		(use_vardiff, new_difficulty) = Interfaces.worker_manager.get_user_difficulty(worker_name)
 		log.info("Loaded requested worker: %s for: difficulty %s" % (str(worker_name), new_difficulty))
 
-		if not is_ext_diff:
+		if use_vardiff:
 			log.warning("Difficulty request invalid.  Worker %s is set to VARDIFF" % worker_name)
 			return False
 
@@ -118,20 +118,29 @@ class MiningService(GenericService):
 
 		if Interfaces.worker_manager.authorize(worker_name, worker_password):
 			session['authorized'][worker_name] = worker_password
-			is_ext_diff = False
-			if settings.ALLOW_EXTERNAL_DIFFICULTY:
-				(is_ext_diff, worker_difficulty_from_db) = Interfaces.worker_manager.get_user_difficulty(worker_name)
-				if is_ext_diff:
-					log.info("Setting authorized worker %s to difficulty %s" % (str(worker_name), worker_difficulty_from_db))
-					# This is key: It sets the worker's difficutly from the database value upon authorization
-					Interfaces.share_limiter.set_worker_difficulty(self.connection_ref, worker_difficulty_from_db, worker_name, True)
-				else:
-					log.info("Authorized worker %s is using VARDIFF leaving difficulty as: %s" % (str(worker_name), session['difficulty']))
-					self.connection_ref().rpc('mining.set_difficulty', [session['difficulty'], ], is_notification=True)
-			else:
-				session['difficulty'] = settings.POOL_TARGET
 
-			Interfaces.worker_manager.worker_log['authorized'][worker_name] = (0, 0, False, session['difficulty'], is_ext_diff, Interfaces.timestamper.time())
+			# Find out the difficulty to setup for this worker and whether or not to enable to VARDIFF (automatic difficulty readajustment)
+			# If resuming VARDIFF, the worker must have last connected no more than 2 days ago. TODO: make this configurable
+			(vardiff_enabled, initial_difficulty) = Interfaces.worker_manager.get_user_difficulty(worker_name, True, 2)
+			log.debug("Session Difficulty: %s, Determined Difficulty: %s VARDIFF: %s" % (session['difficulty'], initial_difficulty, vardiff_enabled))
+
+			if vardiff_enabled:
+				log.info("Authorized worker %s is using VARDIFF, initial difficulty will be set to: %s" % (str(worker_name), initial_difficulty))
+			else:
+				log.info("Setting authorized worker %s to difficulty %s" % (str(worker_name), initial_difficulty))
+
+			# Upon authorization the difficulty will be set and the worker pushed an update
+			# Avoid overhead if the worker's initially subscribed diff (which should be the pool default) in session['difficulty'] is already being used
+			if not session['difficulty'] == initial_difficulty:
+				# This is key: It sets the worker's difficutly to the new a value
+				Interfaces.share_limiter.set_worker_difficulty(self.connection_ref, initial_difficulty, worker_name, True)
+
+				 # A nice information message stating that we have resumed VARDIFF
+				if vardiff_enabled:
+					log.info("VARDIFF resumed for '%s' at %s" % (worker_name, initial_difficulty))
+
+			# Log the action
+			Interfaces.worker_manager.worker_log['authorized'][worker_name] = (0, 0, False, initial_difficulty, vardiff_enabled, Interfaces.timestamper.time())
 			return True
 		else:
 			ip = self.connection_ref()._get_ip()
@@ -147,9 +156,9 @@ class MiningService(GenericService):
 		return subscription details, extranonce1_hex and extranonce2_size'''
 
 		try:
-			log.info("Subscribed: %s" % str(args[0]))
+			log.debug("Subscribed: %s" % str(args[0]))
 		except:
-			log.info("Subscribed: uknown")
+			log.debug("Subscribed: uknown")
 
 		extranonce1 = Interfaces.template_registry.get_new_extranonce1()
 		extranonce2_size = Interfaces.template_registry.extranonce2_size
@@ -195,7 +204,7 @@ class MiningService(GenericService):
 
 		submit_time = Interfaces.timestamper.time()
 
-		(valid, invalid, is_banned, diff, is_ext_diff, last_ts) = Interfaces.worker_manager.worker_log['authorized'][worker_name]
+		(valid, invalid, is_banned, diff, use_vardiff, last_ts) = Interfaces.worker_manager.worker_log['authorized'][worker_name]
 		percent = float(float(invalid) / (float(valid) if valid else 1) * 100)
 
 		if is_banned and submit_time - last_ts > settings.WORKER_BAN_TIME:
@@ -214,25 +223,24 @@ class MiningService(GenericService):
 				log.debug("Clearing worker stats for: %s" % worker_name)
 			(valid, invalid, is_banned, last_ts) = (0, 0, is_banned, Interfaces.timestamper.time())
 
-		log.debug("%s (%d, %d, %s, %s, %d) %0.2f%% work_id(%s) job_id(%s) diff(%f)" % (worker_name, valid, invalid, is_banned, is_ext_diff, last_ts, percent, work_id, job_id, difficulty))
-		if not is_ext_diff:	
+		log.debug("%s (%d, %d, %s, %s, %d) %0.2f%% work_id(%s) job_id(%s) diff(%f)" % (worker_name, valid, invalid, is_banned, use_vardiff, last_ts, percent, work_id, job_id, difficulty))
+		if use_vardiff:
 			Interfaces.share_limiter.submit(self.connection_ref, job_id, difficulty, submit_time, worker_name)
 
 		# This checks if submitted share meet all requirements
 		# and it is valid proof of work.
 		try:
-			(block_header, block_hash, share_diff, on_submit) = Interfaces.template_registry.submit_share(job_id,
+			(block_header, block_hash, share_diff, prev_hash, block_height, on_submit) = Interfaces.template_registry.submit_share(job_id,
 				worker_name, session, extranonce1_bin, extranonce2, ntime, nonce, difficulty, ip)
 		except SubmitException as e:
 			# block_header and block_hash are None when submitted data are corrupted
 			invalid += 1
-			Interfaces.worker_manager.worker_log['authorized'][worker_name] = (valid, invalid, is_banned, difficulty, is_ext_diff, last_ts)
+			Interfaces.worker_manager.worker_log['authorized'][worker_name] = (valid, invalid, is_banned, difficulty, use_vardiff, last_ts)
 
 			if is_banned:
 				raise SubmitException("Worker is temporarily banned")
  
-			Interfaces.share_manager.on_submit_share(worker_name, False, False, difficulty,
-				submit_time, False, ip, e[0], 0)
+			Interfaces.share_manager.on_submit_share(worker_name, False, False, difficulty, submit_time, False, ip, e[0], 0)
 			raise
 
 		# block_header and block_hash are None when submitted share is stale, but accepted
@@ -241,7 +249,7 @@ class MiningService(GenericService):
 		else:
 			valid += 1
 
-		Interfaces.worker_manager.worker_log['authorized'][worker_name] = (valid, invalid, is_banned, difficulty, is_ext_diff, last_ts)
+		Interfaces.worker_manager.worker_log['authorized'][worker_name] = (valid, invalid, is_banned, difficulty, use_vardiff, last_ts)
 
 		if is_banned:
 			raise SubmitException("Worker is temporarily banned")
@@ -254,10 +262,10 @@ class MiningService(GenericService):
 
 		# if 'on_submit' is set, this means it was a potential block candidate as determined by 'template_registry.submit_share()'
 		if on_submit != None:
-			# Pool performs submitblock() to coind. Let's hook
-			# to result and report it to share manager
+			# Pool performs submitblock() to coind. Let's hook to result and report it to share manager
+			# Append additional function paramaters as well.
 			on_submit.addCallback(Interfaces.share_manager.on_submit_block,
-				worker_name, block_header, block_hash, submit_time, ip, share_diff)
+				worker_name, block_header, block_hash, difficulty, prev_hash, block_height, submit_time, ip, share_diff)
 
 		return True
 
